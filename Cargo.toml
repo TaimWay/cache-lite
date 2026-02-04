@@ -1,6 +1,6 @@
 [package]
 name = "cache-lite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A cross-platform caching library for Rust with configurable storage, lifecycle, and file formatting"
 authors = ["TaimWay <taimway@gmail.com>"]
@@ -20,6 +20,3 @@ serde_json = "1.0"
 [dev-dependencies]
 tempfile = "3.3"
 
-[features]
-default = []
-logging = []
