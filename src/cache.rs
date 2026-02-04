@@ -24,12 +24,12 @@
  * SOFTWARE.
  */
 
-use std::io;
 use std::collections::HashMap;
 use std::time::SystemTime;
 use chrono::{DateTime, Local};
 use crate::config::CacheConfig;
 use crate::object::CacheObject;
+use crate::{CacheError, CacheResult};
 
 fn time_format(time: SystemTime, format: &str) -> String {
     let datetime: DateTime<Local> = time.into();
@@ -67,31 +67,32 @@ impl Cache {
     /// 
     /// # Returns
     /// New CacheObject instance
-    pub fn create(&mut self, name: &str, custom_config: Option<&str>) -> io::Result<CacheObject> {
-        if name.contains(std::path::MAIN_SEPARATOR) || name.contains('/') || name.contains('\\') {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid cache name"));
-        }
-
+    pub fn create(&mut self, name: &str, custom_config: Option<&str>) -> CacheResult<CacheObject> {
+        validate_name(name)?;
+        
         let id = self.next_id;
         self.next_id += 1;
         
         let mut merged_config = self.config.clone();
         
         if let Some(config_str) = custom_config {
-            if let Ok(custom) = serde_json::from_str::<CacheConfig>(config_str) {
-                if custom.path.windows != "" {
-                    merged_config.path.windows = custom.path.windows.clone();
+            match serde_json::from_str::<CacheConfig>(config_str) {
+                Ok(custom) => {
+                    if !custom.path.windows.is_empty() {
+                        merged_config.path.windows = custom.path.windows.clone();
+                    }
+                    if !custom.path.linux.is_empty() {
+                        merged_config.path.linux = custom.path.linux.clone();
+                    }
+                    
+                    if !custom.format.filename.is_empty() {
+                        merged_config.format.filename = custom.format.filename.clone();
+                    }
+                    if !custom.format.time.is_empty() {
+                        merged_config.format.time = custom.format.time.clone();
+                    }
                 }
-                if custom.path.linux != "" {
-                    merged_config.path.linux = custom.path.linux.clone();
-                }
-                
-                if custom.format.filename != "" {
-                    merged_config.format.filename = custom.format.filename.clone();
-                }
-                if custom.format.time != "" {
-                    merged_config.format.time = custom.format.time.clone();
-                }
+                Err(e) => return Err(CacheError::ConfigParse(e.to_string())),
             }
         }
         
@@ -115,7 +116,9 @@ impl Cache {
         
         // Create directory if it doesn't exist
         if let Some(parent) = full_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent).map_err(|e| {
+                CacheError::InvalidPath(format!("Failed to create cache directory: {}", e))
+            })?;
         }
         
         let cache_object = CacheObject::new(
@@ -130,7 +133,7 @@ impl Cache {
     }
 
     /// Expands environment variables in path
-    fn expand_path(&self, path: &str) -> String {
+    pub fn expand_path(&self, path: &str) -> String {
         let mut expanded = path.to_string();
         
         // Expand Windows environment variables
@@ -184,19 +187,27 @@ impl Cache {
     /// - `name: &str` - Cache object identifier
     /// 
     /// # Returns
-    /// `io::Result<CacheObject>` - Retrieved cache object or error
-    pub fn get(&self, name: &str) -> io::Result<CacheObject> {
+    /// `CacheResult<CacheObject>` - Retrieved cache object or error
+    pub fn get(&self, name: &str) -> CacheResult<CacheObject> {
         self.objects.get(name)
             .cloned()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cache object not found"))
+            .ok_or_else(|| CacheError::NotFound(format!("Cache object '{}' not found", name)))
     }
 
     /// Returns the number of cache objects
     /// 
     /// # Returns
-    /// `io::Result<u32>` - Count of cache objects or error
-    pub fn len(&self) -> io::Result<u32> {
-        Ok(self.objects.len() as u32)
+    /// `usize` - Count of cache objects
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Check if the cache list is empty
+    /// 
+    /// # Returns
+    /// `bool` - True if the cache list is empty, false otherwise
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
     }
 
     /// Removes a cache object by name
@@ -205,10 +216,10 @@ impl Cache {
     /// - `name: &str` - Cache object identifier
     /// 
     /// # Returns
-    /// `io::Result<()>` - Success or error
-    pub fn remove(&mut self, name: &str) -> io::Result<()> {
+    /// `CacheResult<()>` - Success or error
+    pub fn remove(&mut self, name: &str) -> CacheResult<()> {
         if let Some(cache_obj) = self.objects.remove(name) {
-            let _ = cache_obj.delete();
+            cache_obj.delete()?;
         }
         Ok(())
     }
@@ -216,21 +227,35 @@ impl Cache {
     /// Cleans up expired cache objects
     /// 
     /// # Returns
-    /// `io::Result<u32>` - Number of cleaned objects
+    /// `CacheResult<u32>` - Number of cleaned objects
     #[deprecated(note = "Due to being deprecated in its lifecycle, this function only returns 0; please use the Cache::clear()")]
-    pub fn cleanup(&mut self) -> io::Result<u32> {
-        Ok(0)
+    pub fn cleanup(&mut self) -> CacheResult<u32> {
+        let count = self.objects.len() as u32;
+        self.clear()?;
+        Ok(count)
     }
 
     /// Clears all cache objects
     /// 
     /// # Returns
-    /// `io::Result<()>` - Success or error
-    pub fn clear(&mut self) -> io::Result<()> {
-        for (_, cache_obj) in &self.objects {
-            let _ = cache_obj.delete();
+    /// `CacheResult<()>` - Success or error
+    pub fn clear(&mut self) -> CacheResult<()> {
+        let mut errors = Vec::new();
+        
+        for (name, cache_obj) in &self.objects {
+            if let Err(e) = cache_obj.delete() {
+                errors.push(format!("Failed to delete cache object '{}': {}", name, e));
+            }
         }
+        
         self.objects.clear();
+        
+        if !errors.is_empty() {
+            return Err(CacheError::Generic(format!(
+                "Errors occurred while clearing cache: {}", 
+                errors.join("; ")
+            )));
+        }
         
         Ok(())
     }
@@ -258,4 +283,52 @@ impl Cache {
     pub fn iter(&self) -> impl Iterator<Item = &CacheObject> {
         self.objects.values()
     }
+}
+
+/// Used to verify if the name is valid
+/// 
+/// # Parameters
+/// - `name: &str` - Cache object identifier
+/// 
+/// # Returns
+/// `CacheResult<()>` - Success or error
+fn validate_name(name: &str) -> CacheResult<()> {
+    if name.is_empty() {
+        return Err(CacheError::InvalidName(
+            "Cache name cannot be empty".to_string()
+        ));
+    }
+    
+    if name.contains("..") || name.contains(std::path::MAIN_SEPARATOR) || 
+       name.contains('/') || name.contains('\\') {
+        return Err(CacheError::InvalidName(
+            "Invalid cache name: contains path components".to_string()
+        ));
+    }
+    
+    #[cfg(windows)]
+    {
+        let reserved_names = ["CON", "PRN", "AUX", "NUL", 
+                             "COM1", "COM2", "COM3", "COM4", "COM5", 
+                             "COM6", "COM7", "COM8", "COM9",
+                             "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
+                             "LPT6", "LPT7", "LPT8", "LPT9"]; 
+        
+        let uppercase_name = name.to_uppercase();
+        for reserved in &reserved_names {
+            if uppercase_name == *reserved || uppercase_name.starts_with(&format!("{}.", reserved)) {
+                return Err(CacheError::InvalidName(
+                    format!("Cache name '{}' is a reserved system name", name)
+                ));
+            }
+        }
+    }
+    
+    if name.len() > 255 {
+        return Err(CacheError::InvalidName(
+            "Cache name too long (max 255 characters)".to_string()
+        ));
+    }
+    
+    Ok(())
 }

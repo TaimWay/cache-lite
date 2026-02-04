@@ -25,6 +25,7 @@
  */
 
 use serde::{Deserialize, Serialize};
+use crate::{CacheError, CacheResult};
 
 /// Main configuration structure for cache behavior
 /// 
@@ -72,19 +73,28 @@ impl CacheConfig {
     /// - `json_config: &str` - JSON configuration string
     /// 
     /// # Returns
-    /// New CacheConfig instance
-    pub fn new(json_config: &str) -> Self {
+    /// New CacheConfig instance or error if parsing fails
+    pub fn new(json_config: &str) -> CacheResult<Self> {
         let json_config = json_config
             .trim()
             .replace('\\', "/") 
             .replace(r#"\""#, r#"""#); 
         
-        match serde_json::from_str(&json_config) {
+        serde_json::from_str(&json_config)
+            .map_err(|e| CacheError::ConfigParse(format!("Failed to parse config: {}\nInput: {}", e, json_config)))
+    }
+    
+    /// Creates a new CacheConfig from JSON string, falling back to default on error
+    /// 
+    /// # Parameters
+    /// - `json_config: &str` - JSON configuration string
+    /// 
+    /// # Returns
+    /// New CacheConfig instance (falls back to default on parse error)
+    pub fn new_or_default(json_config: &str) -> Self {
+        match Self::new(json_config) {
             Ok(config) => config,
-            Err(e) => {
-                eprintln!("Failed to parse config: {}\nInput: {}", e, json_config);
-                Self::default()
-            }
+            Err(_) => Self::default(),
         }
     }
     

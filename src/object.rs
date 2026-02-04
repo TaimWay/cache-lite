@@ -24,9 +24,9 @@
  * SOFTWARE.
  */
 
-use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use crate::{CacheError, CacheResult};
 
 /// Represents an individual cache object with file operations
 pub struct CacheObject {
@@ -88,21 +88,23 @@ impl CacheObject {
     /// Opens the cache file for reading/writing
     /// 
     /// # Returns
-    /// `io::Result<std::fs::File>` - File handle or error
-    pub fn get_file(&self) -> io::Result<std::fs::File> {
+    /// `CacheResult<std::fs::File>` - File handle or error
+    pub fn get_file(&self) -> CacheResult<std::fs::File> {
         std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(&self.path)
+            .map_err(|e| CacheError::Io(e))
     }
 
     /// Reads and returns the entire cache content as string
     /// 
     /// # Returns
-    /// `io::Result<String>` - Cache content or error
-    pub fn get_string(&self) -> io::Result<String> {
+    /// `CacheResult<String>` - Cache content or error
+    pub fn get_string(&self) -> CacheResult<String> {
         std::fs::read_to_string(&self.path)
+            .map_err(|e| CacheError::Io(e))
     }
 
     /// Writes string content to the cache file
@@ -111,20 +113,61 @@ impl CacheObject {
     /// - `content: &str` - Content to write
     /// 
     /// # Returns
-    /// `io::Result<()>` - Success or error
-    pub fn write_string(&self, content: &str) -> io::Result<()> {
+    /// `CacheResult<()>` - Success or error
+    pub fn write_string(&self, content: &str) -> CacheResult<()> {
         std::fs::write(&self.path, content)
+            .map_err(|e| CacheError::Io(e))
+    }
+
+    /// Writes binary content to the cache file
+    /// 
+    /// # Parameters
+    /// - `content: &[u8]` - Binary content to write
+    /// 
+    /// # Returns
+    /// `CacheResult<()>` - Success or error
+    pub fn write_bytes(&self, content: &[u8]) -> CacheResult<()> {
+        std::fs::write(&self.path, content)
+            .map_err(|e| CacheError::Io(e))
+    }
+
+    /// Reads and returns the entire cache content as bytes
+    /// 
+    /// # Returns
+    /// `CacheResult<Vec<u8>>` - Cache content or error
+    pub fn get_bytes(&self) -> CacheResult<Vec<u8>> {
+        std::fs::read(&self.path)
+            .map_err(|e| CacheError::Io(e))
     }
 
     /// Deletes the cache object and its file
     /// 
     /// # Returns
-    /// `io::Result<()>` - Success or error
-    pub fn delete(&self) -> io::Result<()> {
+    /// `CacheResult<()>` - Success or error
+    pub fn delete(&self) -> CacheResult<()> {
         if self.path.exists() {
-            std::fs::remove_file(&self.path)?;
+            std::fs::remove_file(&self.path)
+                .map_err(|e| CacheError::Io(e))?;
         }
         Ok(())
+    }
+
+    /// Checks if the cache file exists
+    /// 
+    /// # Returns
+    /// `bool` - True if the cache file exists
+    pub fn exists(&self) -> bool {
+        self.path.exists()
+    }
+
+    /// Gets the file size in bytes
+    /// 
+    /// # Returns
+    /// `CacheResult<u64>` - File size in bytes or error
+    pub fn size(&self) -> CacheResult<u64> {
+        std::fs::metadata(&self.path)
+            .map(|metadata| metadata.len())
+            .map_err(|e| CacheError::Io(e))
     }
 
     /// Checks if the cache has expired based on its lifecycle policy
