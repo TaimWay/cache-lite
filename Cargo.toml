@@ -6,6 +6,7 @@ description = "A cross-platform caching library for Rust with configurable stora
 authors = ["TaimWay <taimway@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/TaimWay/rust-cache"
+documentation = "https://docs.rs/rust-cache"
 keywords = ["cache", "caching", "storage", "file-cache"]
 categories = ["caching", "filesystem"]
 readme = "Readme.md"
