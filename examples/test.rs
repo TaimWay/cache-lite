@@ -1,7 +1,7 @@
 use cache_lite::{Cache, CacheConfig, CacheObject};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cache: Cache = Cache::new(CacheConfig::new(r#"
+    let config = CacheConfig::new(r#"
 {
     "path": {
         "windows": "C:/RustCache",
@@ -11,11 +11,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "filename": "{name}.{id}.{time}.cache",
         "time": "%H.%M.%S"
     }
-}"#));
+}"#)?;
     
-    let cache1: CacheObject = cache.create("hello_rust_cache", None);
+    let mut cache: Cache = Cache::new(config);
+    
+    let cache1: CacheObject = cache.create("hello_rust_cache", None)?;
     println!("Cache1 Name: {}", cache1.name());
     println!("Cache1 Path: {}", cache1.path().display());
+    println!("Cache1 ID: {}", cache1.id());
 
     println!("Input a text: ");
     let mut input: String = String::new();
@@ -29,6 +32,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::sleep(std::time::Duration::from_secs(2));
     cache1.delete()?;
     println!("Cache1 is deleted");
+    
+    println!("Cache count: {}", cache.len());
     
     Ok(())
 }
