@@ -67,7 +67,11 @@ impl Cache {
     /// 
     /// # Returns
     /// New CacheObject instance
-    pub fn create(&mut self, name: &str, custom_config: Option<&str>) -> CacheObject {
+    pub fn create(&mut self, name: &str, custom_config: Option<&str>) -> io::Result<CacheObject> {
+        if name.contains(std::path::MAIN_SEPARATOR) || name.contains('/') || name.contains('\\') {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid cache name"));
+        }
+
         let id = self.next_id;
         self.next_id += 1;
         
@@ -122,7 +126,7 @@ impl Cache {
         
         self.objects.insert(name.to_string(), cache_object.clone());
         
-        cache_object
+        Ok(cache_object)
     }
 
     /// Expands environment variables in path
