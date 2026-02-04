@@ -1,7 +1,7 @@
 /// The code will create cache files in your temporary directory and provides some basic operational methods. 
 /// You can comment out lines 31, 32 and 33 to prevent the deletion of the cache.
 
-use rust_cache::{Cache, CacheConfig, CacheObject};
+use cache_lite::{Cache, CacheConfig, CacheObject};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let style: CacheConfig = CacheConfig::new(r#"
