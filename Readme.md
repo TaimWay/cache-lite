@@ -1,4 +1,4 @@
-# Rust Cache
+# Cache Lite
 
 A lightweight, cross-platform caching library for Rust with configurable storage and file formatting.
 

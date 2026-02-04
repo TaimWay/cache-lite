@@ -1,12 +1,12 @@
 [package]
-name = "rust-cache"
+name = "cache-lite"
 version = "0.1.0"
 edition = "2024"
 description = "A cross-platform caching library for Rust with configurable storage, lifecycle, and file formatting"
 authors = ["TaimWay <taimway@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/TaimWay/rust-cache"
-documentation = "https://docs.rs/rust-cache"
+repository = "https://github.com/TaimWay/cache-lite"
+documentation = "https://docs.rs/cache-lite"
 keywords = ["cache", "caching", "storage", "file-cache"]
 categories = ["caching", "filesystem"]
 readme = "Readme.md"
