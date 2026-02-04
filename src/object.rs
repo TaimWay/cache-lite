@@ -1,6 +1,6 @@
 /*
  * @filename: object.rs
- * @description: Cache object implementation for rust-cache library
+ * @description: Cache object implementation for cache-lite library
  * @author: TaimWay <taimway@gmail.com>
  * 
  * Copyright (C) 2026 TaimWay

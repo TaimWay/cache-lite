@@ -1,6 +1,6 @@
 /*
  * @filename: config.rs
- * @description: Configuration structures for rust-cache library
+ * @description: Configuration structures for cache-lite library
  * @author: TaimWay <taimway@gmail.com>
  * 
  * Copyright (C) 2026 TaimWay

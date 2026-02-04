@@ -1,6 +1,6 @@
 /*
  * @filename: cache.rs
- * @description: Main cache manager for rust-cache library
+ * @description: Main cache manager for cache-lite library
  * @author: TaimWay <taimway@gmail.com>
  * 
  * Copyright (C) 2026 TaimWay
