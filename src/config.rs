@@ -74,9 +74,18 @@ impl CacheConfig {
     /// # Returns
     /// New CacheConfig instance
     pub fn new(json_config: &str) -> Self {
-        // Parse JSON configuration
-        serde_json::from_str(json_config)
-            .unwrap_or_else(|_| Self::default())
+        let json_config = json_config
+            .trim()
+            .replace('\\', "/") 
+            .replace(r#"\""#, r#"""#); 
+        
+        match serde_json::from_str(&json_config) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to parse config: {}\nInput: {}", e, json_config);
+                Self::default()
+            }
+        }
     }
     
     /// Creates a new CacheConfig with default values

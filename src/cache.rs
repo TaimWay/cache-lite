@@ -28,7 +28,7 @@ use std::io;
 use std::collections::HashMap;
 use std::time::SystemTime;
 use chrono::{DateTime, Local};
-use crate::config::{CacheConfig, CacheFormatConfig, };
+use crate::config::CacheConfig;
 use crate::object::CacheObject;
 
 fn time_format(time: SystemTime, format: &str) -> String {
@@ -71,28 +71,43 @@ impl Cache {
         let id = self.next_id;
         self.next_id += 1;
         
-        // Parse custom config if provided
-        let mut format_str = self.config.format.filename.clone();
+        let mut merged_config = self.config.clone();
         
         if let Some(config_str) = custom_config {
-            if let Ok(custom) = serde_json::from_str::<CacheFormatConfig>(config_str) {
-                format_str = custom.filename;
+            if let Ok(custom) = serde_json::from_str::<CacheConfig>(config_str) {
+                if custom.path.windows != "" {
+                    merged_config.path.windows = custom.path.windows.clone();
+                }
+                if custom.path.linux != "" {
+                    merged_config.path.linux = custom.path.linux.clone();
+                }
+                
+                if custom.format.filename != "" {
+                    merged_config.format.filename = custom.format.filename.clone();
+                }
+                if custom.format.time != "" {
+                    merged_config.format.time = custom.format.time.clone();
+                }
             }
-            // Note: Custom lifecycle would need more complex parsing
         }
         
         let cache_path = if cfg!(windows) {
-            self.expand_path(&self.config.path.windows)
+            self.expand_path(&merged_config.path.windows)
         } else {
-            self.expand_path(&self.config.path.linux)
+            self.expand_path(&merged_config.path.linux)
         };
         
-        let filename = format_str
+        let filename = merged_config.format.filename
             .replace("{name}", name)
             .replace("{id}", &id.to_string())
-            .replace("{time}", &time_format(SystemTime::now(), &self.config.format.time));
+            .replace("{time}", &time_format(SystemTime::now(), &merged_config.format.time));
             
         let full_path = std::path::PathBuf::from(&cache_path).join(&filename);
+        
+        #[cfg(windows)]
+        let full_path = std::path::PathBuf::from(
+            full_path.to_string_lossy().replace('/', "\\")
+        );
         
         // Create directory if it doesn't exist
         if let Some(parent) = full_path.parent() {
@@ -124,6 +139,11 @@ impl Cache {
             if let Some(home) = dirs::home_dir() {
                 expanded = home.to_string_lossy().to_string() + &expanded[1..];
             }
+        }
+        
+        #[cfg(windows)]
+        {
+            expanded = expanded.replace('/', "\\");
         }
         
         expanded
