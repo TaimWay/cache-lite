@@ -1,6 +1,6 @@
 [package]
 name = "cache-lite"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A cross-platform caching library for Rust with configurable storage, lifecycle, and file formatting"
 authors = ["TaimWay <taimway@gmail.com>"]
