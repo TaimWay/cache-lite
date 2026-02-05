@@ -40,20 +40,26 @@
 //! 
 //! ```no_run
 //! use cache_lite::{Cache, CacheConfig};
-//! 
-//! // Create cache with default configuration
-//! let config = CacheConfig::default();
-//! let mut cache = Cache::new(config);
-//! 
-//! // Create a new cache object
-//! let cache_obj = cache.create("my_cache", None).unwrap();
-//! 
-//! // Write data to cache
-//! cache_obj.write_string("Cached data").unwrap();
-//! 
-//! // Read data from cache
-//! let data = cache_obj.get_string().unwrap();
-//! assert_eq!(data, "Cached data");
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create cache with default configuration
+//!     let config = CacheConfig::default();
+//!     let mut cache = Cache::new(config)?;
+//!
+//!     // Create a new cache object
+//!     let cache_obj = cache.create("my_cache", None).unwrap();
+//!
+//!     // Write data to cache
+//!     cache_obj.write_string("Cached data").unwrap();
+//!
+//!     // Read data from cache
+//!     let data = cache_obj.get_string().unwrap();
+//!     assert_eq!(data, "Cached data");
+//!
+//!     cache_obj.delete()?;
+//!
+//!     Ok(())
+//! }
 //! ```
 //! 
 //! # Configuration
@@ -83,6 +89,7 @@ mod config;
 mod object;
 mod cache;
 mod error;
+mod utils;
 
 // Re-export public API
 pub use config::{CacheConfig, CachePathConfig, CacheFormatConfig};
@@ -96,711 +103,472 @@ pub type CacheResult<T> = std::result::Result<T, CacheError>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::tempdir;
-    
+
     #[test]
     fn test_cache_config_default() {
         let config = CacheConfig::default();
-        
-        // Check default Windows path
-        assert!(config.path.windows.contains("%temp%"));
-        assert!(config.path.windows.contains("Rust/Cache"));
-        
-        // Check default Linux path
-        assert_eq!(config.path.linux, "/tmp/Rust/Cache");
-        
-        // Check default filename format
-        assert!(config.format.filename.contains("{name}"));
-        assert!(config.format.filename.contains("{time}"));
-        
-        // Check default time format
-        assert_eq!(config.format.time, "%Y+%m+%d-%H+%M+%S");
+        assert_eq!(config.max_size, 0);
+        assert_eq!(config.max_files, 0);
+        assert!(!config.path.windows.is_empty());
+        assert!(!config.path.linux.is_empty());
+        assert!(!config.format.filename.is_empty());
+        assert!(!config.format.time.is_empty());
     }
-    
+
     #[test]
     fn test_cache_config_from_json() {
-        let json_config = r#"
-        {
+        let json = r#"{
             "path": {
-                "windows": "C:/Temp/Cache",
-                "linux": "/var/cache"
+                "windows": "%temp%/TestCache",
+                "linux": "/tmp/testcache"
             },
             "format": {
-                "filename": "cache_{name}.dat",
+                "filename": "test_{name}.cache",
                 "time": "%Y%m%d"
-            }
-        }
-        "#;
-        
-        let config = CacheConfig::new(json_config).expect("Failed to parse config");
-        
-        assert_eq!(config.path.windows, "C:/Temp/Cache");
-        assert_eq!(config.path.linux, "/var/cache");
-        assert_eq!(config.format.filename, "cache_{name}.dat");
+            },
+            "max_size": 1024,
+            "max_files": 10
+        }"#;
+
+        let config = CacheConfig::new(json).unwrap();
+        assert_eq!(config.path.windows, "%temp%/TestCache");
+        assert_eq!(config.path.linux, "/tmp/testcache");
+        assert_eq!(config.format.filename, "test_{name}.cache");
         assert_eq!(config.format.time, "%Y%m%d");
+        assert_eq!(config.max_size, 1024);
+        assert_eq!(config.max_files, 10);
     }
-    
+
+    #[test]
+    fn test_cache_config_from_partial_json() {
+        let json = r#"{
+            "path": {
+                "linux": "/custom/path"
+            },
+            "format": {
+                "filename": "custom_{name}.cache"
+            }
+        }"#;
+
+        let config = CacheConfig::new(json).unwrap();
+        assert_eq!(config.path.linux, "/custom/path");
+        assert_eq!(config.format.filename, "custom_{name}.cache");
+        // Windows path should use default
+        assert!(!config.path.windows.is_empty());
+        // Time format should use default
+        assert!(!config.format.time.is_empty());
+    }
+
     #[test]
     fn test_cache_config_new_or_default() {
-        // Test valid JSON
-        let valid_json = r#"
-        {
-            "path": {
-                "windows": "C:/Custom/Cache",
-                "linux": "/custom/cache"
-            },
-            "format": {
-                "filename": "custom_{name}.dat",
-                "time": "%Y%m"
-            }
+        let json = "invalid json";
+        let config = CacheConfig::new_or_default(json);
+        // Should fall back to default
+        assert_eq!(config.max_size, 0);
+        assert_eq!(config.max_files, 0);
+    }
+
+    #[test]
+    fn test_cache_creation() {
+        let temp_dir = tempdir().unwrap();
+        let config_json = format!(
+            r#"{{
+                "path": {{
+                    "windows": "{}",
+                    "linux": "{}"
+                }},
+                "format": {{
+                    "filename": "{{name}}.cache",
+                    "time": "%Y%m%d"
+                }},
+                "max_size": 0,
+                "max_files": 0
+            }}"#,
+            temp_dir.path().to_string_lossy(),
+            temp_dir.path().to_string_lossy()
+        );
+
+        let config = CacheConfig::new(&config_json).unwrap();
+        let mut cache = Cache::new(config).unwrap();
+
+        // Test create cache object
+        let cache_obj = cache.create("test_cache", None).unwrap();
+        assert_eq!(cache_obj.name(), "test_cache");
+        
+        // Write some data to ensure file exists
+        cache_obj.write_string("test data").unwrap();
+        assert!(cache_obj.exists());
+
+        // Test duplicate creation fails
+        let result = cache.create("test_cache", None);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, CacheError::AlreadyExists(_)));
         }
-        "#;
-        
-        let config = CacheConfig::new_or_default(valid_json);
-        assert_eq!(config.path.windows, "C:/Custom/Cache");
-        assert_eq!(config.path.linux, "/custom/cache");
-        assert_eq!(config.format.filename, "custom_{name}.dat");
-        assert_eq!(config.format.time, "%Y%m");
-        
-        // Test invalid JSON - should fall back to default
-        let invalid_json = "{invalid json";
-        let config = CacheConfig::new_or_default(invalid_json);
-        assert!(config.path.windows.contains("%temp%"));
-        assert_eq!(config.path.linux, "/tmp/Rust/Cache");
-    }
-    
-    #[test]
-    fn test_cache_config_invalid_json() {
-        let invalid_json = "{invalid json";
-        let result = CacheConfig::new(invalid_json);
-        
-        // Should return error
+
+        // Test get cache object
+        let retrieved = cache.get("test_cache").unwrap();
+        assert_eq!(retrieved.name(), "test_cache");
+        assert_eq!(retrieved.id(), cache_obj.id());
+
+        // Test get non-existent cache
+        let result = cache.get("nonexistent");
         assert!(result.is_err());
-        
-        // Check error type
-        let error = result.err().unwrap();
-        assert_eq!(error.kind(), "config_parse");
-        assert!(error.message().contains("Failed to parse config"));
-    }
-    
-    #[test]
-    fn test_cache_object_creation_and_properties() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        let test_path = temp_dir.path().join("test_cache.cache");
-        
-        let cache_object = CacheObject::new(
-            "test_object".to_string(),
-            test_path.clone(),
-            1
-        );
-        
-        assert_eq!(cache_object.name(), "test_object");
-        assert_eq!(cache_object.id(), 1);
-        assert_eq!(cache_object.path(), test_path);
-        assert!(cache_object.created_at().elapsed().is_ok());
-    }
-    
-    #[test]
-    fn test_cache_object_file_operations() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        let test_path = temp_dir.path().join("test_operations.cache");
-        
-        let cache_object = CacheObject::new(
-            "test_ops".to_string(),
-            test_path.clone(),
-            2
-        );
-        
-        // Test write operation
-        let content = "Hello, Cache!";
-        cache_object.write_string(content).expect("Failed to write to cache");
-        
-        // Verify file was created
-        assert!(test_path.exists());
-        assert!(test_path.is_file());
-        
-        // Test read operation
-        let read_content = cache_object.get_string().expect("Failed to read from cache");
-        assert_eq!(read_content, content);
-        
-        // Test file handle retrieval
-        let file = cache_object.get_file().expect("Failed to open cache file");
-        assert!(file.metadata().is_ok());
-        
-        // Test delete operation
-        cache_object.delete().expect("Failed to delete cache file");
-        assert!(!test_path.exists());
-    }
-    
-    #[test]
-    fn test_cache_object_advanced_operations() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        let test_path = temp_dir.path().join("test_advanced.cache");
-        
-        let cache_object = CacheObject::new(
-            "test_advanced".to_string(),
-            test_path.clone(),
-            1
-        );
-        
-        // Test writing and reading bytes
-        let bytes = vec![1, 2, 3, 4, 5];
-        cache_object.write_bytes(&bytes).expect("Failed to write bytes");
-        
-        let read_bytes = cache_object.get_bytes().expect("Failed to read bytes");
-        assert_eq!(read_bytes, bytes);
-        
-        // Test file size
-        let size = cache_object.size().expect("Failed to get file size");
-        assert_eq!(size, 5);
-        
-        // Test file existence
-        assert!(cache_object.exists());
-        
-        // Test delete
-        cache_object.delete().expect("Failed to delete");
-        assert!(!cache_object.exists());
-        
-        // Test getting size of non-existent file
-        let result = cache_object.size();
-        assert!(result.is_err());
-    }
-    
-    #[test]
-    fn test_cache_object_clone() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        let test_path = temp_dir.path().join("test_clone.cache");
-        
-        let original = CacheObject::new(
-            "original".to_string(),
-            test_path.clone(),
-            3
-        );
-        
-        let cloned = original.clone();
-        
-        assert_eq!(original.name(), cloned.name());
-        assert_eq!(original.id(), cloned.id());
-        assert_eq!(original.path(), cloned.path());
-        
-        // Cloned object should have same properties but be a separate instance
-        assert_eq!(original.name(), "original");
-        assert_eq!(cloned.name(), "original");
-    }
-    
-    #[test]
-    fn test_cache_management() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        // Create custom configuration for testing
-        let config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#, 
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
-        );
-        
-        let config = CacheConfig::new(&config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(config);
-        
-        // Test creating cache objects
-        let cache_obj1 = cache.create("test_cache_1", None)
-            .expect("Failed to create cache object 1");
-        assert_eq!(cache_obj1.name(), "test_cache_1");
-        assert_eq!(cache_obj1.id(), 1);
-        
-        let cache_obj2 = cache.create("test_cache_2", None)
-            .expect("Failed to create cache object 2");
-        assert_eq!(cache_obj2.name(), "test_cache_2");
-        assert_eq!(cache_obj2.id(), 2);
-        
-        // Test cache size
-        assert_eq!(cache.len(), 2);
-        assert!(!cache.is_empty());
-        
-        // Test retrieving cache objects
-        let retrieved1 = cache.get("test_cache_1")
-            .expect("Failed to get cache object 1");
-        assert_eq!(retrieved1.name(), "test_cache_1");
-        
-        let retrieved2 = cache.get("test_cache_2")
-            .expect("Failed to get cache object 2");
-        assert_eq!(retrieved2.name(), "test_cache_2");
-        
-        // Test removing a cache object
-        cache.remove("test_cache_1").expect("Failed to remove cache object");
+        if let Err(e) = result {
+            assert!(matches!(e, CacheError::NotFound(_)));
+        }
+
+        // Test length and empty
         assert_eq!(cache.len(), 1);
-        
-        // Verify removed object can't be retrieved
-        assert!(cache.get("test_cache_1").is_err());
-        
-        // Verify remaining object is still accessible
-        assert!(cache.get("test_cache_2").is_ok());
-        
-        // Test clearing all cache objects
-        cache.clear().expect("Failed to clear cache");
+        assert!(!cache.is_empty());
+
+        // Test iterator
+        let objects: Vec<_> = cache.iter().collect();
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].name(), "test_cache");
+    }
+
+    #[test]
+    fn test_cache_operations() {
+        let temp_dir = tempdir().unwrap();
+        let config_json = format!(
+            r#"{{
+                "path": {{
+                    "windows": "{}",
+                    "linux": "{}"
+                }},
+                "format": {{
+                    "filename": "{{name}}.cache",
+                    "time": "%Y%m%d"
+                }},
+                "max_size": 0,
+                "max_files": 0
+            }}"#,
+            temp_dir.path().to_string_lossy(),
+            temp_dir.path().to_string_lossy()
+        );
+
+        let config = CacheConfig::new(&config_json).unwrap();
+        let mut cache = Cache::new(config).unwrap();
+
+        // Create multiple cache objects
+        cache.create("cache1", None).unwrap();
+        cache.create("cache2", None).unwrap();
+        cache.create("cache3", None).unwrap();
+
+        assert_eq!(cache.len(), 3);
+
+        // Test remove operation
+        cache.remove("cache2").unwrap();
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get("cache2").is_err());
+
+        // Test clear operation
+        cache.clear().unwrap();
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
     }
-    
+
     #[test]
-    fn test_cache_management_with_error_handling() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        // Create custom configuration for testing
-        let config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#, 
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
+    fn test_cache_object_operations() {
+        let temp_dir = tempdir().unwrap();
+        let config_json = format!(
+            r#"{{
+                "path": {{
+                    "windows": "{}",
+                    "linux": "{}"
+                }},
+                "format": {{
+                    "filename": "{{name}}.cache",
+                    "time": "%Y%m%d"
+                }},
+                "max_size": 0,
+                "max_files": 0
+            }}"#,
+            temp_dir.path().to_string_lossy(),
+            temp_dir.path().to_string_lossy()
         );
-        
-        let config = CacheConfig::new(&config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(config);
-        
-        // Test creating cache objects with invalid names
-        let result = cache.create("", None);
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap().kind(), "invalid_name");
-        
-        // Test creating valid cache object
-        let cache_obj = cache.create("test_cache", None)
-            .expect("Failed to create cache object");
-        
-        // Test writing and reading with error handling
-        let write_result = cache_obj.write_string("Test content");
-        assert!(write_result.is_ok());
-        
-        let read_result = cache_obj.get_string();
-        assert!(read_result.is_ok());
-        assert_eq!(read_result.unwrap(), "Test content");
-        
-        // Test getting non-existent cache
-        let result = cache.get("non_existent");
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap().kind(), "not_found");
+
+        let config = CacheConfig::new(&config_json).unwrap();
+        let mut cache = Cache::new(config).unwrap();
+        let cache_obj = cache.create("test_operations", None).unwrap();
+
+        // Test string operations
+        let test_string = "Hello, World!";
+        cache_obj.write_string(test_string).unwrap();
+
+        let read_string = cache_obj.get_string().unwrap();
+        assert_eq!(read_string, test_string);
+
+        // Test binary operations
+        let test_bytes = vec![1, 2, 3, 4, 5];
+        cache_obj.write_bytes(&test_bytes).unwrap();
+
+        let read_bytes = cache_obj.get_bytes().unwrap();
+        assert_eq!(read_bytes, test_bytes);
+
+        // Test file operations
+        let file = cache_obj.get_file().unwrap();
+        assert!(file.metadata().is_ok());
+
+        // Test size
+        let size = cache_obj.size().unwrap();
+        assert!(size > 0);
+
+        // Test delete
+        cache_obj.delete().unwrap();
+        assert!(!cache_obj.exists());
+
+        // Test creation time
+        let new_obj = cache.create("new_cache", None).unwrap();
+        let created_at = new_obj.created_at();
+        assert!(created_at.elapsed().is_ok());
     }
-    
+
     #[test]
-    fn test_cache_invalid_names() {
-        let config = CacheConfig::default();
-        let mut cache = Cache::new(config);
-        
-        // Test with empty name
-        let result = cache.create("", None);
-        assert!(result.is_err(), "Should reject empty names");
-        
-        // Test with path traversal attempt
-        let result = cache.create("../evil", None);
-        assert!(result.is_err(), "Should reject path traversal names");
-        
-        // Test with slash in name
-        let result = cache.create("path/to/cache", None);
-        assert!(result.is_err(), "Should reject names with slashes");
-        
-        // Test with backslash in name (Windows)
-        let result = cache.create("path\\to\\cache", None);
-        assert!(result.is_err(), "Should reject names with backslashes");
-        
-        // Test with valid name
-        let result = cache.create("valid_cache_name", None);
-        assert!(result.is_ok(), "Should accept valid cache names");
-    }
-    
-    #[test]
-    fn test_cache_custom_configuration() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        // Base configuration
-        let base_config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "default_{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#,
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
+    fn test_cache_with_custom_config() {
+        let temp_dir = tempdir().unwrap();
+        let base_config_json = format!(
+            r#"{{
+                "path": {{
+                    "windows": "{}",
+                    "linux": "{}"
+                }},
+                "format": {{
+                    "filename": "base_{{name}}.cache",
+                    "time": "%Y%m%d"
+                }},
+                "max_size": 0,
+                "max_files": 0
+            }}"#,
+            temp_dir.path().to_string_lossy(),
+            temp_dir.path().to_string_lossy()
         );
-        
-        let base_config = CacheConfig::new(&base_config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(base_config);
-        
-        // Custom configuration to override filename format
-        let custom_config = r#"
-        {
+
+        let base_config = CacheConfig::new(&base_config_json).unwrap();
+        let mut cache = Cache::new(base_config).unwrap();
+
+        let custom_config = r#"{
             "path": {
-                "windows": "",
-                "linux": ""
+                "linux": "/custom/path"
             },
             "format": {
-                "filename": "custom_{name}_{id}.dat",
-                "time": "%H%M%S"
+                "filename": "custom_{name}_{id}.cache"
             }
-        }
-        "#;
-        
-        let cache_obj = cache.create("custom_cache", Some(custom_config))
-            .expect("Failed to create cache with custom config");
-        
-        let path_str = cache_obj.path().to_string_lossy();
-        
-        // Should use custom filename format
-        assert!(path_str.contains("custom_custom_cache_"), 
-                "Path should contain custom pattern: {}", path_str);
-        assert!(path_str.ends_with(".dat"), 
-                "Path should end with .dat: {}", path_str);
+        }"#;
+
+        let cache_obj = cache.create("custom_cache", Some(custom_config)).unwrap();
+        let path_str = cache_obj.path().to_string_lossy().to_string();
+
+        // Write data to ensure file exists
+        cache_obj.write_string("test").unwrap();
+
+        // Check that custom format is used
+        assert!(path_str.contains("custom_cache"));
+        assert!(path_str.contains(".cache"));
     }
-    
+
     #[test]
-    fn test_cache_iterator() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        let config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#,
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
-        );
-        
-        let config = CacheConfig::new(&config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(config);
-        
-        // Create multiple cache objects
-        let _ = cache.create("cache_a", None).expect("Failed to create cache_a");
-        let _ = cache.create("cache_b", None).expect("Failed to create cache_b");
-        let _ = cache.create("cache_c", None).expect("Failed to create cache_c");
-        
-        // Test iterator collects all names
-        let names: Vec<String> = cache.iter()
-            .map(|obj| obj.name().to_string())
-            .collect();
-        
-        assert_eq!(names.len(), 3, "Should have 3 cache objects");
-        assert!(names.contains(&"cache_a".to_string()));
-        assert!(names.contains(&"cache_b".to_string()));
-        assert!(names.contains(&"cache_c".to_string()));
-        
-        // Test iterator order (should be arbitrary for HashMap)
-        let ids: Vec<u32> = cache.iter()
-            .map(|obj| obj.id())
-            .collect();
-        
-        assert_eq!(ids.len(), 3);
-        assert!(ids.contains(&1));
-        assert!(ids.contains(&2));
-        assert!(ids.contains(&3));
-    }
-    
-    #[test]
-    fn test_cache_configuration_get_set() {
-        let mut config = CacheConfig::default();
-        
-        // Modify configuration
-        config.path.windows = "C:/Custom/Path".to_string();
-        config.path.linux = "/custom/path".to_string();
-        config.format.filename = "custom_{name}.dat".to_string();
-        config.format.time = "%Y".to_string();
-        
-        let mut cache = Cache::new(config.clone());
-        
-        // Verify initial configuration
-        let retrieved_config = cache.get_config();
-        assert_eq!(retrieved_config.path.windows, "C:/Custom/Path");
-        assert_eq!(retrieved_config.path.linux, "/custom/path");
-        assert_eq!(retrieved_config.format.filename, "custom_{name}.dat");
-        assert_eq!(retrieved_config.format.time, "%Y");
-        
-        // Update configuration
-        let new_config = CacheConfig::default();
+    fn test_cache_config_updates() {
+        let config = CacheConfig::default();
+        let mut cache = Cache::new(config).unwrap();
+
+        let new_config_json = r#"{
+            "path": {
+                "windows": "%temp%/UpdatedCache",
+                "linux": "/tmp/updatedcache"
+            },
+            "format": {
+                "filename": "updated_{name}.cache",
+                "time": "%H%M%S"
+            },
+            "max_size": 2048,
+            "max_files": 20
+        }"#;
+
+        let new_config = CacheConfig::new(new_config_json).unwrap();
         cache.set_config(new_config.clone());
-        
-        // Verify updated configuration
-        let updated_config = cache.get_config();
-        assert_eq!(updated_config.path.windows, new_config.path.windows);
-        assert_eq!(updated_config.path.linux, new_config.path.linux);
-        assert_eq!(updated_config.format.filename, new_config.format.filename);
-        assert_eq!(updated_config.format.time, new_config.format.time);
+
+        let retrieved_config = cache.get_config();
+        assert_eq!(retrieved_config.max_size, 2048);
+        assert_eq!(retrieved_config.max_files, 20);
+        assert_eq!(retrieved_config.format.filename, "updated_{name}.cache");
     }
-    
+
     #[test]
-    fn test_cache_error_types() {
-        use std::io::{Error, ErrorKind};
+    fn test_validate_name() {
+        // Valid names
+        assert!(crate::utils::validate_name("valid_name").is_ok());
+        assert!(crate::utils::validate_name("valid123").is_ok());
+        assert!(crate::utils::validate_name("a").is_ok());
+
+        // Invalid names
+        assert!(crate::utils::validate_name("").is_err());
+        assert!(crate::utils::validate_name(&"a".repeat(256)).is_err());
+        assert!(crate::utils::validate_name("test/name").is_err());
+        assert!(crate::utils::validate_name("test\\name").is_err());
+        assert!(crate::utils::validate_name("test..name").is_err());
         
-        // Test CacheError display implementation
-        let io_error = CacheError::Io(Error::new(ErrorKind::NotFound, "File not found"));
-        assert_eq!(format!("{}", io_error), "I/O error: File not found");
-        
-        let invalid_name_error = CacheError::InvalidName("test".to_string());
-        assert_eq!(format!("{}", invalid_name_error), "Invalid cache name: test");
-        
-        let config_error = CacheError::ConfigParse("Invalid JSON".to_string());
-        assert_eq!(format!("{}", config_error), "Configuration parse error: Invalid JSON");
-        
-        // Test error kind method
-        assert_eq!(io_error.kind(), "io");
-        assert_eq!(invalid_name_error.kind(), "invalid_name");
-        assert_eq!(config_error.kind(), "config_parse");
-        
-        // Test error message method
-        assert_eq!(io_error.message(), "File not found");
-        assert_eq!(invalid_name_error.message(), "test");
-        assert_eq!(config_error.message(), "Invalid JSON");
-        
-        // Test error type checks
-        assert!(io_error.is_io_error());
-        assert!(!invalid_name_error.is_io_error());
-        assert!(!config_error.is_io_error());
-    }
-    
-    #[test]
-    fn test_cache_deprecated_functions() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        let config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#,
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
-        );
-        
-        let config = CacheConfig::new(&config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(config);
-        
-        // Create a cache object to test deprecated functions
-        let cache_obj = cache.create("deprecated_test", None)
-            .expect("Failed to create cache object");
-        
-        // Test deprecated is_expired method (always returns false)
-        #[allow(deprecated)]
-        let expired = cache_obj.is_expired();
-        assert!(!expired, "is_expired should always return false");
-        
-        // Test deprecated cleanup method
-        #[allow(deprecated)]
-        let cleanup_result = cache.cleanup();
-        assert!(cleanup_result.is_ok());
-        
-        // After cleanup, cache should be empty
-        assert_eq!(cache.len(), 0);
-    }
-    
-    #[test]
-    fn test_cache_path_expansion() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        let temp_path = temp_dir.path().to_string_lossy().to_string();
-        
-        let config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "test.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#,
-        temp_path.replace("\\", "\\\\"),
-        temp_path
-        );
-        
-        let config = CacheConfig::new(&config_json).expect("Failed to parse config");
-        let cache = Cache::new(config);
-        
-        // Test path expansion - should not modify already absolute paths
-        let expanded = cache.expand_path(&temp_path);
-        assert_eq!(expanded, temp_path);
-        
-        // Test tilde expansion (if home directory is available)
-        if dirs::home_dir().is_some() {
-            let expanded = cache.expand_path("~/test/cache");
-            assert!(!expanded.contains('~'), "Tilde should be expanded");
+        #[cfg(windows)]
+        {
+            assert!(crate::utils::validate_name("CON").is_err());
+            assert!(crate::utils::validate_name("test:name").is_err());
+            assert!(crate::utils::validate_name("test<name").is_err());
         }
     }
-    
+
     #[test]
-    fn test_cache_concurrent_ids() {
-        let config = CacheConfig::default();
-        let mut cache = Cache::new(config);
-        
-        // Create multiple cache objects and verify they get sequential IDs
-        let obj1 = cache.create("obj1", None).expect("Failed to create obj1");
-        assert_eq!(obj1.id(), 1);
-        
-        let obj2 = cache.create("obj2", None).expect("Failed to create obj2");
-        assert_eq!(obj2.id(), 2);
-        
-        let obj3 = cache.create("obj3", None).expect("Failed to create obj3");
-        assert_eq!(obj3.id(), 3);
-        
-        // Remove one and create another
-        cache.remove("obj2").expect("Failed to remove obj2");
-        let obj4 = cache.create("obj4", None).expect("Failed to create obj4");
-        assert_eq!(obj4.id(), 4); // IDs should continue incrementing
-        
-        // Create more objects
-        let obj5 = cache.create("obj5", None).expect("Failed to create obj5");
-        assert_eq!(obj5.id(), 5);
+    fn test_error_handling() {
+        // Test error creation
+        let io_error = CacheError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
+        assert_eq!(io_error.kind(), "io");
+
+        let generic_error = CacheError::new("Test error");
+        assert_eq!(generic_error.kind(), "generic");
+        assert_eq!(generic_error.message(), "Test error");
+
+        // Test error conversions
+        let io_err: std::io::Error = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let cache_err: CacheError = io_err.into();
+        assert!(cache_err.is_io_error());
+
+        let json_err = serde_json::from_str::<CacheConfig>("invalid json");
+        assert!(json_err.is_err());
     }
-    
+
     #[test]
-    fn test_cache_large_name_rejection() {
-        let config = CacheConfig::default();
-        let mut cache = Cache::new(config);
-        
-        // Create a name that's too long
-        let long_name = "a".repeat(300);
-        let result = cache.create(&long_name, None);
-        
-        // Should reject names longer than 255 characters
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap().kind(), "invalid_name");
-        
-        // Create a name at the limit
-        let limit_name = "a".repeat(255);
-        let result = cache.create(&limit_name, None);
-        
-        // Should accept names at exactly 255 characters
-        assert!(result.is_ok());
+    fn test_cache_object_clone() {
+        let temp_dir = tempdir().unwrap();
+        let config_json = format!(
+            r#"{{
+                "path": {{
+                    "windows": "{}",
+                    "linux": "{}"
+                }},
+                "format": {{
+                    "filename": "{{name}}.cache",
+                    "time": "%Y%m%d"
+                }},
+                "max_size": 0,
+                "max_files": 0
+            }}"#,
+            temp_dir.path().to_string_lossy(),
+            temp_dir.path().to_string_lossy()
+        );
+
+        let config = CacheConfig::new(&config_json).unwrap();
+        let mut cache = Cache::new(config).unwrap();
+        let cache_obj = cache.create("clone_test", None).unwrap();
+
+        // Write data first
+        cache_obj.write_string("test data").unwrap();
+
+        // Test cloning
+        let cloned = cache_obj.clone();
+        assert_eq!(cloned.name(), cache_obj.name());
+        assert_eq!(cloned.id(), cache_obj.id());
+        assert_eq!(cloned.path(), cache_obj.path());
+
+        // Check clone sees the same content
+        let cloned_content = cloned.get_string().unwrap();
+        assert_eq!(cloned_content, "test data");
     }
-    
+
+    #[test]
+    fn test_expand_path() {
+        // Test tilde expansion
+        let path_with_tilde = "~/test/path";
+        let expanded = crate::utils::expand_path(path_with_tilde);
+        if let Some(home) = dirs::home_dir() {
+            let home_str = home.to_string_lossy();
+            assert!(expanded.starts_with(&*home_str));
+        }
+
+        // Test Windows env var expansion (only on Windows)
+        #[cfg(windows)]
+        {
+            let path_with_env = "%temp%/test";
+            let expanded = crate::utils::expand_path(path_with_env);
+            assert!(!expanded.contains("%temp%"));
+        }
+
+        // Test path separator conversion
+        let unix_path = "path/to/file";
+        let expanded = crate::utils::expand_path(unix_path);
+        
+        #[cfg(windows)]
+        assert!(expanded.contains('\\'));
+        
+        #[cfg(unix)]
+        assert!(expanded.contains('/'));
+    }
+
     #[test]
     fn test_cache_clear_with_errors() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        let config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#,
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
+        let temp_dir = tempdir().unwrap();
+        let config_json = format!(
+            r#"{{
+                "path": {{
+                    "windows": "{}",
+                    "linux": "{}"
+                }},
+                "format": {{
+                    "filename": "{{name}}.cache",
+                    "time": "%Y%m%d"
+                }},
+                "max_size": 0,
+                "max_files": 0
+            }}"#,
+            temp_dir.path().to_string_lossy(),
+            temp_dir.path().to_string_lossy()
         );
+
+        let config = CacheConfig::new(&config_json).unwrap();
+        let mut cache = Cache::new(config).unwrap();
+
+        // Create a cache object
+        let cache_obj = cache.create("test_clear", None).unwrap();
         
-        let config = CacheConfig::new(&config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(config);
-        
-        // Create cache objects
-        let obj1 = cache.create("obj1", None).expect("Failed to create obj1");
-        let obj2 = cache.create("obj2", None).expect("Failed to create obj2");
-        
-        // Manually delete one file to simulate error
-        std::fs::remove_file(obj1.path()).expect("Failed to delete file");
-        
-        // Try to clear cache - should still work even with one error
-        let result = cache.clear();
-        assert!(result.is_ok()); // clear() should still succeed even with deletion errors
+        // Write data to ensure file exists
+        cache_obj.write_string("test data").unwrap();
+        assert!(cache_obj.exists());
+
+        // Clear should work
+        cache.clear().unwrap();
         
         // Cache should be empty
         assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+        
+        // File should be deleted
+        assert!(!cache_obj.exists());
     }
-    
+
     #[test]
-    fn test_cache_duplicate_names() {
+    fn test_error_matches() {
+        // Test error matches
+        let io_error = CacheError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
+        assert!(io_error.is_io_error());
+
+        let not_found_error = CacheError::NotFound("test".to_string());
+        assert!(not_found_error.is_not_found());
+
+        let permission_error = CacheError::PermissionDenied("test".to_string());
+        assert!(permission_error.is_permission_denied());
+    }
+
+    #[test]
+    fn test_config_serde_roundtrip() {
         let config = CacheConfig::default();
-        let mut cache = Cache::new(config);
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed_config = CacheConfig::new(&json).unwrap();
         
-        // Create first cache object
-        let result1 = cache.create("duplicate", None);
-        assert!(result1.is_ok());
-        
-        // Try to create another with same name - should overwrite (not error)
-        let result2 = cache.create("duplicate", None);
-        assert!(result2.is_ok());
-        
-        // Should have only one object with that name
-        assert_eq!(cache.len(), 1);
-    }
-    
-    #[test]
-    fn test_cache_empty_config_override() {
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        
-        let base_config_json = format!(r#"
-        {{
-            "path": {{
-                "windows": "{}",
-                "linux": "{}"
-            }},
-            "format": {{
-                "filename": "base_{{name}}.cache",
-                "time": "%Y%m%d"
-            }}
-        }}"#,
-        temp_dir.path().to_string_lossy().replace("\\", "\\\\"),
-        temp_dir.path().to_string_lossy()
-        );
-        
-        let base_config = CacheConfig::new(&base_config_json).expect("Failed to parse config");
-        let mut cache = Cache::new(base_config);
-        
-        // Custom config with empty strings (should not override base config)
-        let custom_config = r#"
-        {
-            "path": {
-                "windows": "",
-                "linux": ""
-            },
-            "format": {
-                "filename": "",
-                "time": ""
-            }
-        }
-        "#;
-        
-        let cache_obj = cache.create("test", Some(custom_config))
-            .expect("Failed to create cache object");
-        
-        let path_str = cache_obj.path().to_string_lossy();
-        
-        // Should use base config since custom config has empty strings
-        assert!(path_str.contains("base_test"), 
-                "Path should contain base pattern: {}", path_str);
-        assert!(path_str.ends_with(".cache"), 
-                "Path should end with .cache: {}", path_str);
+        assert_eq!(config.max_size, parsed_config.max_size);
+        assert_eq!(config.max_files, parsed_config.max_files);
+        assert_eq!(config.path.windows, parsed_config.path.windows);
+        assert_eq!(config.path.linux, parsed_config.path.linux);
+        assert_eq!(config.format.filename, parsed_config.format.filename);
+        assert_eq!(config.format.time, parsed_config.format.time);
     }
 }

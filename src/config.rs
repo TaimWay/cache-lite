@@ -34,36 +34,57 @@ use crate::{CacheError, CacheResult};
 /// - `format`: File naming format template
 /// - `lifecycle`: Cache lifecycle policy
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]  
 pub struct CacheConfig {
     pub path: CachePathConfig,
-    pub format: CacheFormatConfig
+    pub format: CacheFormatConfig,
+    pub max_size: u64,
+    pub max_files: usize
 }
 
 /// Platform-specific path configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]  
 pub struct CachePathConfig {
     pub windows: String,
     pub linux: String,
 }
 
+impl Default for CachePathConfig {
+    fn default() -> Self {
+        CachePathConfig {
+            windows: "%temp%/Rust/Cache".to_string(),
+            linux: "/tmp/Rust/Cache".to_string(),
+        }
+    }
+}
+
 /// File naming format configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]  
 pub struct CacheFormatConfig {
     pub filename: String,
     pub time: String
 }
 
-/// Cache lifecycle policy
-#[deprecated(note="This enumeration has been temporarily deprecated due to issues. You can use the CacheObject::delete() function to delete cache files.")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub enum LifecyclePolicy {
-    /// Cache persists until program termination
-    ProgramTerminated,
-    /// Cache persists until it goes out of scope
-    Scope,
-    /// Cache never expires (default)
-    Never
+impl Default for CacheFormatConfig {
+    fn default() -> Self {
+        CacheFormatConfig {
+            filename: "r{name}.{time}.cache".to_string(),
+            time: "%Y+%m+%d-%H+%M+%S".to_string()
+        }
+    }
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        CacheConfig {
+            path: CachePathConfig::default(),
+            format: CacheFormatConfig::default(),
+            max_size: 0,  // 0 means no limit
+            max_files: 0, // 0 means no limit
+        }
+    }
 }
 
 impl CacheConfig {
@@ -95,20 +116,6 @@ impl CacheConfig {
         match Self::new(json_config) {
             Ok(config) => config,
             Err(_) => Self::default(),
-        }
-    }
-    
-    /// Creates a new CacheConfig with default values
-    pub fn default() -> Self {
-        CacheConfig {
-            path: CachePathConfig {
-                windows: "%temp%/Rust/Cache".to_string(),
-                linux: "/tmp/Rust/Cache".to_string(),
-            },
-            format: CacheFormatConfig {
-                filename: "r{name}.{time}.cache".to_string(),
-                time: "%Y+%m+%d-%H+%M+%S".to_string()
-            }
         }
     }
 }

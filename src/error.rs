@@ -50,6 +50,14 @@ pub enum CacheError {
     Serialization(String),
     /// Invalid path or directory
     InvalidPath(String),
+    /// Symbolic link detected (security risk)
+    SymlinkDetected(String),
+    /// Cache size limit exceeded
+    SizeLimitExceeded(String),
+    /// Cache file count limit exceeded
+    FileCountLimitExceeded(String),
+    /// Cache object corrupted
+    Corrupted(String),
     /// Generic error with message
     Generic(String),
 }
@@ -67,6 +75,10 @@ impl fmt::Display for CacheError {
             CacheError::InvalidConfig(msg) => write!(f, "Invalid configuration: {}", msg),
             CacheError::Serialization(msg) => write!(f, "Serialization error: {}", msg),
             CacheError::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
+            CacheError::SymlinkDetected(msg) => write!(f, "Symbolic link detected: {}", msg),
+            CacheError::SizeLimitExceeded(msg) => write!(f, "Cache size limit exceeded: {}", msg),
+            CacheError::FileCountLimitExceeded(msg) => write!(f, "Cache file count limit exceeded: {}", msg),
+            CacheError::Corrupted(msg) => write!(f, "Cache corrupted: {}", msg),
             CacheError::Generic(msg) => write!(f, "Error: {}", msg),
         }
     }
@@ -100,6 +112,10 @@ impl CacheError {
             CacheError::InvalidConfig(_) => "invalid_config",
             CacheError::Serialization(_) => "serialization",
             CacheError::InvalidPath(_) => "invalid_path",
+            CacheError::SymlinkDetected(_) => "symlink_detected",
+            CacheError::SizeLimitExceeded(_) => "size_limit_exceeded",
+            CacheError::FileCountLimitExceeded(_) => "file_count_limit_exceeded",
+            CacheError::Corrupted(_) => "corrupted",
             CacheError::Generic(_) => "generic",
         }
     }
@@ -117,6 +133,10 @@ impl CacheError {
             CacheError::InvalidConfig(msg) => msg.clone(),
             CacheError::Serialization(msg) => msg.clone(),
             CacheError::InvalidPath(msg) => msg.clone(),
+            CacheError::SymlinkDetected(msg) => msg.clone(),
+            CacheError::SizeLimitExceeded(msg) => msg.clone(),
+            CacheError::FileCountLimitExceeded(msg) => msg.clone(),
+            CacheError::Corrupted(msg) => msg.clone(),
             CacheError::Generic(msg) => msg.clone(),
         }
     }

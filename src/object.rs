@@ -29,6 +29,7 @@ use std::time::SystemTime;
 use crate::{CacheError, CacheResult};
 
 /// Represents an individual cache object with file operations
+#[derive(Debug)]
 pub struct CacheObject {
     name: String,
     path: PathBuf,
