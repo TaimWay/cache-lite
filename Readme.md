@@ -16,13 +16,13 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-cache = "0.1.0"
+cache-lite = "0.1.0"
 ```
 
 ## Quick Start
 
 ```rust
-use rust_cache::{Cache, CacheConfig};
+use cache_lite::{Cache, CacheConfig};
 
 fn main() -> std::io::Result<()> {
     // Create cache with default configuration
@@ -163,7 +163,7 @@ The filename format supports these placeholders:
 ### Advanced Usage
 
 ```rust
-use rust_cache::{Cache, CacheConfig, CacheObject};
+use cache_lite::{Cache, CacheConfig, CacheObject};
 use std::io;
 
 fn complex_example() -> io::Result<()> {
@@ -212,8 +212,8 @@ fn complex_example() -> io::Result<()> {
 
 ```bash
 # Clone the repository
-git clone https://github.com/TaimWay/rust-cache.git
-cd rust-cache
+git clone https://github.com/TaimWay/cache-lite.git
+cd cache-lite
 
 # Build the library
 cargo build --release
@@ -240,5 +240,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For issues, questions, or suggestions:
 
-- Open an issue on [GitHub](https://github.com/TaimWay/rust-cache/issues)
+- Open an issue on [GitHub](https://github.com/TaimWay/cache-lite/issues)
 - Contact: TaimWay <taimway@gmail.com>
