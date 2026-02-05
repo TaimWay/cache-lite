@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }"#)?;
     
-    let mut cache: Cache = Cache::new(config);
+    let mut cache: Cache = Cache::new(config)?;
     
     let cache1: CacheObject = cache.create("hello_rust_cache", None)?;
     println!("Cache1 Name: {}", cache1.name());
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     cache1.delete()?;
     println!("Cache1 is deleted");
     
-    println!("Cache count: {}", cache.len());
+    cache.clear()?;
     
     Ok(())
 }
